@@ -98,26 +98,27 @@ python infer_pua.py --model ./outputs/gpt2-kanakanji-pua --input ニホンゴ
 python infer_pua.py --model ./outputs/gpt2-kanakanji-pua --input ノイライガクルヨウニ --left_context きっかけで、漫画の仕事
 ```
 
-## AJIMEE-like evaluation (greedy)
+## AJIMEE-Bench evaluation (greedy)
 
 ```bash
-# Evaluate 200 examples from HF dataset split
-python eval_ajimee_like.py --model ./outputs/gpt2-kanakanji-pua --dataset Miwa-Keita/zenz-v2.5-dataset --split train --limit 200
+# Evaluate official AJIMEE-Bench (auto-download if missing)
+python eval_ajimee_like.py --model ./outputs/gpt2-kanakanji-pua --limit 200
 
-# Evaluate local benchmark JSONL
+# Evaluate local benchmark JSONL (AJIMEE-style schema)
 python eval_ajimee_like.py --model ./outputs/gpt2-kanakanji-pua --eval_jsonl ./bench.jsonl --limit 200 --save_predictions ./predictions.jsonl
 ```
 
 Expected JSONL schema:
 
 - input: katakana input
-- output: reference conversion
-- left_context: optional left context (empty or null allowed)
+- expected_output: list of acceptable conversion candidates (preferred)
+- output: single reference conversion (backward-compatible)
+- left_context or context_text: optional left context (empty or null allowed)
 
 Metrics:
 
-- exact_match
-- avg_cer (character error rate)
+- accuracy_at1
+- avg_min_cer (minimum character error rate over expected_output)
 - with_context / without_context breakdown
 
 ## Notes
