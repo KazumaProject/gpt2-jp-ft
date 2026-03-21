@@ -1,18 +1,28 @@
 # Result
 
-## 200000
+### 200000
 
-### command:
+#### command:
+
 ```bash
 python train_pua_compatible.py --max_train_samples 200000 --num_train_epochs 1 --hardware gtx1060 --save_steps 100000000 --save_total_limit 1 --learning_rate 2e-5
+
+python eval_ajimee_gguf.py   --model_gguf ./outputs/gpt2-kanakanji-pua-gguf/model-Q4_K_M.gguf   --limit 200   --save_predictions ./predictions.gguf.jsonl   --result_json ./result.gguf.json
 ```
 
-### Output:
-```bash
+#### Output:
 
-=== AJIMEE-Bench result (greedy) ===
-overall: n=200, accuracy_at1=0.1650, avg_min_cer=0.3328
-with_context: n=100, accuracy_at1=0.1700, avg_min_cer=0.3316
-without_context: n=100, accuracy_at1=0.1600, avg_min_cer=0.3340
+```json
+
+"with_context": {
+    "n": 100,
+    "accuracy_at1": 0.14,
+    "avg_min_cer": 0.3680904970469264
+  },
+  "without_context": {
+    "n": 100,
+    "accuracy_at1": 0.15,
+    "avg_min_cer": 0.3638288256273299
+  }
 
 ```
