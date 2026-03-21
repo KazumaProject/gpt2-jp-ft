@@ -32,6 +32,12 @@ pip install --index-url https://download.pytorch.org/whl/cu118 torch==2.1.2
 pip install -r requirements.txt
 ```
 
+For GGUF evaluation pipeline, install `llama-cpp-python` too:
+
+```bash
+pip install llama-cpp-python
+```
+
 For GTX1060 (sm_61), avoid `transformers` 5.x with the latest `torch` CUDA 12.8 wheels,
 because that combination drops this GPU architecture.
 
@@ -98,26 +104,78 @@ python infer_pua.py --model ./outputs/gpt2-kanakanji-pua --input ニホンゴ
 python infer_pua.py --model ./outputs/gpt2-kanakanji-pua --input ノイライガクルヨウニ --left_context きっかけで、漫画の仕事
 ```
 
-## AJIMEE-like evaluation (greedy)
+## AJIMEE-Bench evaluation (greedy)
 
 ```bash
-# Evaluate 200 examples from HF dataset split
-python eval_ajimee_like.py --model ./outputs/gpt2-kanakanji-pua --dataset Miwa-Keita/zenz-v2.5-dataset --split train --limit 200
+# Evaluate official AJIMEE-Bench (auto-download if missing)
+python eval_ajimee_like.py --model ./outputs/gpt2-kanakanji-pua --limit 200
 
-# Evaluate local benchmark JSONL
+# Evaluate local benchmark JSONL (AJIMEE-style schema)
 python eval_ajimee_like.py --model ./outputs/gpt2-kanakanji-pua --eval_jsonl ./bench.jsonl --limit 200 --save_predictions ./predictions.jsonl
+```
+
+## Train -> GGUF -> Quantize -> AJIMEE-Bench (one command)
+
+Prerequisite:
+
+- `llama.cpp` is cloned and built (`llama-quantize` available)
+- `llama-cpp-python` installed for GGUF evaluation
+
+Example:
+
+```bash
+python train_pua_compatible.py --max_train_samples 200000 --num_train_epochs 1 --hardware gtx1060 --save_steps 100000000 --save_total_limit 1 --learning_rate 2e-5
+```
+
+Artifacts are saved under:
+
+- GGUF / quantized files: `<output_dir>-gguf/`
+- AJIMEE predictions/results: `<output_dir>-gguf/ajimee/`
+
+## GGUF export/quantize only (separate script)
+
+Prepare `llama.cpp` (ensan-hcl fork) under parent directory:
+
+```bash
+git clone --depth 1 https://github.com/ensan-hcl/llama.cpp ../llama.cpp
+
+# Option A: build with make (no cmake required)
+make -C ../llama.cpp -j
+
+# Option B: build with cmake
+cmake -S ../llama.cpp -B ../llama.cpp/build
+cmake --build ../llama.cpp/build -j
+```
+
+```bash
+python export_quantize_gguf.py \
+  --model_dir ./outputs/gpt2-kanakanji-pua \
+  --llama_cpp_dir ../llama.cpp \
+  --gguf_outtype f16 \
+  --quantize_types Q4_K_M,Q5_K_M
+```
+
+You can also run GGUF evaluation directly:
+
+```bash
+python eval_ajimee_gguf.py \
+  --model_gguf ./outputs/gpt2-kanakanji-pua-gguf/model-Q4_K_M.gguf \
+  --limit 200 \
+  --save_predictions ./predictions.gguf.jsonl \
+  --result_json ./result.gguf.json
 ```
 
 Expected JSONL schema:
 
 - input: katakana input
-- output: reference conversion
-- left_context: optional left context (empty or null allowed)
+- expected_output: list of acceptable conversion candidates (preferred)
+- output: single reference conversion (backward-compatible)
+- left_context or context_text: optional left context (empty or null allowed)
 
 Metrics:
 
-- exact_match
-- avg_cer (character error rate)
+- accuracy_at1
+- avg_min_cer (minimum character error rate over expected_output)
 - with_context / without_context breakdown
 
 ## Notes

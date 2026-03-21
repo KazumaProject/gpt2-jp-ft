@@ -1,12 +1,11 @@
 import argparse
+import importlib
 import json
+import os
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
-
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 CONTEXT_TOKEN = "\uEE02"
 INPUT_START_TOKEN = "\uEE00"
@@ -44,7 +43,6 @@ def levenshtein(a: str, b: str) -> int:
 
 
 def calculate_CER(reference: str, hypothesis: str) -> float:
-    """Same CER definition as AJIMEE-Bench utils.py."""
     if len(reference) == 0:
         return float("inf")
     return levenshtein(reference, hypothesis) / len(reference)
@@ -130,8 +128,8 @@ def load_examples(args: argparse.Namespace) -> Iterable[Example]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run AJIMEE-Bench evaluation for PUA kana-kanji models")
-    parser.add_argument("--model", required=True, help="HF repo or local model dir")
+    parser = argparse.ArgumentParser(description="Run AJIMEE-Bench evaluation for GGUF models via llama.cpp")
+    parser.add_argument("--model_gguf", required=True)
     parser.add_argument(
         "--ajimee_json",
         default="~/.cache/ajimee-bench/evaluation_items.json",
@@ -144,22 +142,28 @@ def main() -> None:
     )
     parser.add_argument("--limit", type=int, default=200)
     parser.add_argument("--max_new_tokens", type=int, default=64)
-    parser.add_argument("--device", choices=["auto", "cpu", "mps", "cuda"], default="auto")
+    parser.add_argument("--n_ctx", type=int, default=512)
+    parser.add_argument("--threads", type=int, default=max(1, (os.cpu_count() or 4) // 2))
+    parser.add_argument("--n_gpu_layers", type=int, default=0)
     parser.add_argument("--save_predictions", default=None, help="Optional JSONL path to save prediction details")
+    parser.add_argument("--result_json", default=None, help="Optional JSON path to save summary metrics")
     args = parser.parse_args()
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model)
-    model = AutoModelForCausalLM.from_pretrained(args.model)
-    model.eval()
+    try:
+        llama_cpp = importlib.import_module("llama_cpp")
+        Llama = getattr(llama_cpp, "Llama")
+    except Exception as e:
+        raise SystemExit(
+            "llama-cpp-python is required for GGUF evaluation. Install with: pip install llama-cpp-python"
+        ) from e
 
-    if args.device == "cuda" or (args.device == "auto" and torch.cuda.is_available()):
-        device = "cuda"
-    elif args.device == "mps" or (args.device == "auto" and torch.backends.mps.is_available()):
-        device = "mps"
-    else:
-        device = "cpu"
-
-    model = model.to(device)
+    llm = Llama(
+        model_path=args.model_gguf,
+        n_ctx=args.n_ctx,
+        n_threads=args.threads,
+        n_gpu_layers=args.n_gpu_layers,
+        verbose=False,
+    )
 
     n = 0
     acc_at1_sum = 0
@@ -180,19 +184,17 @@ def main() -> None:
     try:
         for ex in load_examples(args):
             prompt = build_prompt(ex.left_context, ex.input_kana)
-            input_ids = tokenizer.encode(prompt, add_special_tokens=False, return_tensors="pt").to(device)
+            out = llm(
+                prompt,
+                max_tokens=args.max_new_tokens,
+                temperature=0.0,
+                top_k=1,
+                top_p=1.0,
+                repeat_penalty=1.0,
+                echo=False,
+            )
 
-            with torch.no_grad():
-                output_ids = model.generate(
-                    input_ids,
-                    max_new_tokens=args.max_new_tokens,
-                    do_sample=False,
-                    eos_token_id=tokenizer.eos_token_id,
-                    pad_token_id=tokenizer.pad_token_id,
-                )
-
-            generated = output_ids[0][input_ids.shape[1]:]
-            pred = tokenizer.decode(generated, skip_special_tokens=True).strip()
+            pred = out["choices"][0]["text"].strip()
             references = [r.strip() for r in ex.expected_outputs]
 
             c = calculate_MinCER(references, pred)
@@ -233,13 +235,48 @@ def main() -> None:
         print("[error] no evaluation examples found")
         return
 
-    print("\n=== AJIMEE-Bench result (greedy) ===")
-    print(f"overall: n={n}, accuracy_at1={acc_at1_sum / n:.4f}, avg_min_cer={mincer_sum / n:.4f}")
-
+    result: Dict[str, object] = {
+        "overall": {
+            "n": n,
+            "accuracy_at1": acc_at1_sum / n,
+            "avg_min_cer": mincer_sum / n,
+        }
+    }
     if n_ctx > 0:
-        print(f"with_context: n={n_ctx}, accuracy_at1={acc_ctx / n_ctx:.4f}, avg_min_cer={mincer_ctx / n_ctx:.4f}")
+        result["with_context"] = {
+            "n": n_ctx,
+            "accuracy_at1": acc_ctx / n_ctx,
+            "avg_min_cer": mincer_ctx / n_ctx,
+        }
     if n_noctx > 0:
-        print(f"without_context: n={n_noctx}, accuracy_at1={acc_noctx / n_noctx:.4f}, avg_min_cer={mincer_noctx / n_noctx:.4f}")
+        result["without_context"] = {
+            "n": n_noctx,
+            "accuracy_at1": acc_noctx / n_noctx,
+            "avg_min_cer": mincer_noctx / n_noctx,
+        }
+
+    print("\n=== AJIMEE-Bench result (gguf, greedy) ===")
+    print(
+        f"overall: n={n}, accuracy_at1={result['overall']['accuracy_at1']:.4f}, "
+        f"avg_min_cer={result['overall']['avg_min_cer']:.4f}"
+    )
+    if "with_context" in result:
+        print(
+            f"with_context: n={result['with_context']['n']}, "
+            f"accuracy_at1={result['with_context']['accuracy_at1']:.4f}, "
+            f"avg_min_cer={result['with_context']['avg_min_cer']:.4f}"
+        )
+    if "without_context" in result:
+        print(
+            f"without_context: n={result['without_context']['n']}, "
+            f"accuracy_at1={result['without_context']['accuracy_at1']:.4f}, "
+            f"avg_min_cer={result['without_context']['avg_min_cer']:.4f}"
+        )
+
+    if args.result_json:
+        with open(args.result_json, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        print(f"[done] saved result json: {args.result_json}")
 
 
 if __name__ == "__main__":
