@@ -28,8 +28,12 @@ Training loss is applied only on target tokens.
 ```bash
 python -m venv .venv
 source .venv/bin/activate
+pip install --index-url https://download.pytorch.org/whl/cu118 torch==2.1.2
 pip install -r requirements.txt
 ```
+
+For GTX1060 (sm_61), avoid `transformers` 5.x with the latest `torch` CUDA 12.8 wheels,
+because that combination drops this GPU architecture.
 
 ## Smoke test (recommended first)
 

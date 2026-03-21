@@ -1,4 +1,5 @@
 import argparse
+import inspect
 import math
 import os
 from dataclasses import dataclass
@@ -96,6 +97,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num_train_epochs", type=float, default=1.0)
     parser.add_argument("--learning_rate", type=float, default=2e-5)
     parser.add_argument("--warmup_ratio", type=float, default=0.01)
+    parser.add_argument("--warmup_steps", type=int, default=None)
     parser.add_argument("--weight_decay", type=float, default=0.01)
     parser.add_argument("--logging_steps", type=int, default=50)
     parser.add_argument("--save_steps", type=int, default=2000)
@@ -182,16 +184,21 @@ def main() -> None:
     cols = ds.column_names
     tokenized = ds.map(preprocess, remove_columns=cols, num_proc=args.num_proc, desc="Tokenizing")
 
+    steps_per_epoch = math.ceil(len(tokenized) / (batch_size * grad_accum))
+    total_training_steps = max(1, int(steps_per_epoch * args.num_train_epochs))
+    warmup_steps = args.warmup_steps
+    if warmup_steps is None:
+        warmup_steps = max(0, int(total_training_steps * args.warmup_ratio))
+
     train_args = TrainingArguments(
         output_dir=args.output_dir,
-        overwrite_output_dir=True,
         do_train=True,
         per_device_train_batch_size=batch_size,
         gradient_accumulation_steps=grad_accum,
         learning_rate=args.learning_rate,
         num_train_epochs=args.num_train_epochs,
         lr_scheduler_type="cosine",
-        warmup_ratio=args.warmup_ratio,
+        warmup_steps=warmup_steps,
         weight_decay=args.weight_decay,
         logging_steps=args.logging_steps,
         save_steps=args.save_steps,
@@ -206,12 +213,18 @@ def main() -> None:
         hub_model_id=args.hub_model_id,
     )
 
-    trainer = Trainer(
-        model=model,
-        args=train_args,
-        train_dataset=tokenized,
-        tokenizer=tokenizer,
-    )
+    trainer_kwargs = {
+        "model": model,
+        "args": train_args,
+        "train_dataset": tokenized,
+    }
+    # transformers v5 uses `processing_class`; v4 expects `tokenizer`.
+    if "processing_class" in inspect.signature(Trainer.__init__).parameters:
+        trainer_kwargs["processing_class"] = tokenizer
+    else:
+        trainer_kwargs["tokenizer"] = tokenizer
+
+    trainer = Trainer(**trainer_kwargs)
 
     trainer.train()
     trainer.save_model(args.output_dir)
