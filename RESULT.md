@@ -26,3 +26,19 @@ python eval_ajimee_gguf.py   --model_gguf ./outputs/gpt2-kanakanji-pua-gguf/mode
   }
 
 ```
+### 500000
+
+```bash
+
+python train_pua_compatible.py --max_train_samples 500000 --num_train_epochs 1 --hardware gtx1060 --save_steps 100000000 --save_total_limit 1 --learning_rate 2e-5 --output_dir ./outputs/gpt2-kanakanji-pua-500000
+
+```
+
+```bash
+
+=== AJIMEE-Bench result (greedy) ===
+overall: n=200, accuracy_at1=0.2550, avg_min_cer=0.2164
+with_context: n=100, accuracy_at1=0.2400, avg_min_cer=0.2169
+without_context: n=100, accuracy_at1=0.2700, avg_min_cer=0.2160
+
+```
