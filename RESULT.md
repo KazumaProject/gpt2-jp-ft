@@ -42,3 +42,12 @@ with_context: n=100, accuracy_at1=0.2400, avg_min_cer=0.2169
 without_context: n=100, accuracy_at1=0.2700, avg_min_cer=0.2160
 
 ```
+
+### 1000000
+
+```bash
+=== AJIMEE-Bench result (gguf, greedy) ===
+overall: n=200, accuracy_at1=0.3500, avg_min_cer=0.1413
+with_context: n=100, accuracy_at1=0.3600, avg_min_cer=0.1456
+without_context: n=100, accuracy_at1=0.3400, avg_min_cer=0.1371
+```
